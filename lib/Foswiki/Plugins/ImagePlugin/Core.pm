@@ -600,7 +600,7 @@ sub processImage {
       }
 
       # write
-      $error = $this->{mage}->Write($imgInfo{imgPath});
+      $error = $this->{mage}->[0]->Write($imgInfo{imgPath});
       if ($error =~ /(\d+)/) {
 	$this->{errorMsg} .= " $error";
         writeDebug("Error: $error");
