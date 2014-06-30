@@ -816,7 +816,7 @@ sub getImageFile {
 
   my $digest = Digest::MD5::md5_hex($size, $zoom, $crop, $fileSize);
 
-  $imgFile =~ s/\.svg$/\.png/g;
+  $imgFile =~ s/$/\.png/g unless $imgFile =~ /\.(jpe?g|png|gif)$/;
 
   if ($imgFile =~ /^(.*)\/(.+?)$/) {
     return $1."/igp_".$digest."_".$2;
