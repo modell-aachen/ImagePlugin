@@ -1,7 +1,7 @@
 # Plugin for Foswiki - The Free and Open Source Wiki, http://foswiki.org/
 #
 # Copyright (C) 2006 Craig Meyer, meyercr@gmail.com
-# Copyright (C) 2006-2013 Michael Daum http://michaeldaumconsulting.com
+# Copyright (C) 2006-2014 Michael Daum http://michaeldaumconsulting.com
 #
 # Early version Based on ImgPlugin
 # Copyright (C) 2006 Meredith Lesly, msnomer@spamcop.net
@@ -44,12 +44,12 @@ BEGIN {
   }
 };
 
-use constant DEBUG => 0; # toggle me
+use constant TRACE => 0; # toggle me
 
 ###############################################################################
 # static
 sub writeDebug {
-  print STDERR "ImagePlugin - $_[0]\n" if DEBUG;
+  print STDERR "ImagePlugin - $_[0]\n" if TRACE;
 }
 
 ###############################################################################
@@ -102,7 +102,7 @@ sub handleREST {
   my $refresh = $query->param('refresh') || '';
   $refresh = ($refresh =~ /^(on|1|yes|img)$/g)?1:0;
 
-  ($imgFile) = Foswiki::Sandbox::sanitizeAttachmentName($imgFile);
+  $imgFile = sanitizeAttachmentName($imgFile);
 
   writeDebug("processing image");
   my $imgInfo = $this->processImage($imgWeb, $imgTopic, $imgFile, {
@@ -113,8 +113,10 @@ sub handleREST {
       height => ($query->param('height')||''),
     } ,$refresh);
   unless ($imgInfo) {
-    Foswiki::Func::writeWarning("ImagePlugin - $this->{errorMsg}");
-    return '';
+    $imgInfo->{file} = 'pixel.gif';
+    $imgInfo->{filesize} = '807';
+    $imgWeb = $Foswiki::cfg{SystemWebName};
+    $imgTopic = 'ImagePlugin';
   }
 
   my $mimeType = $this->suffixToMimeType($imgInfo->{file});
@@ -166,7 +168,7 @@ sub handleIMAGE {
   my $origFile = $params->{_DEFAULT} || $params->{file};
   return '' unless $origFile;
 
-  #writeDebug("origFile=$origFile");
+  writeDebug("origFile=$origFile");
 
   # default and fix parameters
   $params->{warn} ||= '';
@@ -244,11 +246,9 @@ sub handleIMAGE {
     }
 
     # sanitize downloaded filename
-    my $dummy;
-    ($origFile, $dummy) = Foswiki::Sandbox::sanitizeAttachmentName($origFile);
-    if ($origFile ne $dummy) {
-      writeDebug("sanitized filename from $dummy to $origFile");
-    }
+    $origFile = sanitizeAttachmentName($origFile);
+
+    writeDebug("sanizized to $origFile");
 
     $imgTopic = $params->{topic} || $theTopic;
     ($imgWeb, $imgTopic) = 
@@ -258,6 +258,8 @@ sub handleIMAGE {
     $imgPath .= '/'.$imgTopic;
     mkdir($imgPath) unless -d $imgPath;
     $imgPath .= '/'.$origFile;
+
+    #writeDebug("imgPath=$imgPath");
 
     unless($this->mirrorImage($imgWeb, $imgTopic, $url, $imgPath, $doRefresh)) {
       return $this->inlineError($params);
@@ -362,7 +364,8 @@ sub handleIMAGE {
 
   $result =~ s/\s+$//; # strip whitespace at the end
   $result =  $params->{header}.$result.$params->{footer};
-  $result =~ s/\$caption/$this->getTemplate('caption')/ge;
+
+  $result =~ s/\$caption/$this->getTemplate('caption')/ge if $params->{caption};
   $result =~ s/\$caption/$params->{caption}/g;
   $result =~ s/\$magnifyFormat/$this->getTemplate('magnify')/ge;
   $result =~ s/\$magnifyIcon/$this->{magnifyIcon}/g;
@@ -405,12 +408,12 @@ sub handleIMAGE {
   $result =~ s/\$thumbfile/$imgInfo->{file}/g;
   $result =~ s/\$width/(pingImage($this, $imgInfo))[0]/ge;
   $result =~ s/\$height/(pingImage($this, $imgInfo))[1]/ge;
-  $result =~ s/\$framewidth/(pingImage($this, $imgInfo))[0]+2/ge;
+  $result =~ s/\$framewidth/(pingImage($this, $imgInfo))[0]-1/ge;
   $result =~ s/\$origsrc/$origFileUrl/g;
   $result =~ s/\$origwidth/(pingOrigImage($this, $imgInfo))[0]/ge;
   $result =~ s/\$origheight/(pingOrigImage($this, $imgInfo))[1]/ge;
   $result =~ s/\$text/$origFile/g;
-  $result =~ s/\$class/$params->{class}/g;
+  $result =~ s/\$class/ $params->{class}/g;
   $result =~ s/\$data/$params->{data}/g;
   $result =~ s/\$id/$params->{id}/g;
   $result =~ s/\$style/$params->{style}/g;
@@ -519,6 +522,10 @@ sub processImage {
     writeDebug("size=$size");
 
     $imgInfo{file} = $this->getImageFile($size, $zoom, $crop, $imgWeb, $imgTopic, $imgFile);
+    unless ($imgInfo{file}) {
+      $this->{errorMsg} = "(5) can't find <nop>$imgFile at <nop>$imgWeb.$imgTopic";
+      return;
+    }
     $imgInfo{imgPath} = $Foswiki::cfg{PubDir}.'/'.$imgWeb.'/'.$imgTopic.'/'.$imgInfo{file};
 
     #writeDebug("checking for $imgInfo{imgFile}");
@@ -529,11 +536,15 @@ sub processImage {
 
     if (-f $imgInfo{imgPath} && !$doRefresh) { # cached
       writeDebug("found $imgInfo{file} at $imgWeb.$imgTopic");
+      $imgInfo{filesize} = -s $imgInfo{imgPath};
     } else { 
       writeDebug("creating $imgInfo{file}");
+
+      my $source = $imgInfo{origImgPath};
+      $source .= '[0]' if $source =~ /\.gif$/i; # extract the first frame
      
       # read
-      my $error = $this->{mage}->Read($imgInfo{origImgPath});
+      my $error = $this->{mage}->Read($source);
       if ($error =~ /(\d+)/) {
 	$this->{errorMsg} = $error;
 	return undef if $1 >= 400;
@@ -616,21 +627,24 @@ sub processImage {
 sub afterRenameHandler {
   my ($this, $oldWeb, $oldTopic, $oldAttachment, $newWeb, $newTopic, $newAttachment ) = @_;
 
-#  print STDERR "afterRename($oldWeb, $oldTopic, ".
-#    ($oldAttachment||'undef').", ".
-#    ($newWeb||'undef').", ".
-#    ($newTopic||'undef').", ".
-#    ($newAttachment||'undef').")\n";
+# print STDERR "afterRename(oldWeb=$oldWeb, oldTopic=$oldTopic, oldAttachment=".
+#   ($oldAttachment||'undef').", newWeb=".
+#   ($newWeb||'undef').", newTopic=".
+#   ($newTopic||'undef').", newAttachment=".
+#   ($newAttachment||'undef').")\n";
 
   return unless defined $oldAttachment;  
-  return if defined $newAttachment && $oldAttachment eq $newAttachment;
+  return unless defined $newAttachment;  
+  return if $oldAttachment eq $newAttachment &&
+            $oldWeb eq $newWeb &&
+            $oldTopic eq $newTopic;
 
   # attachment has been renamed, delete old thumbnails
   my $web = $oldWeb;
   my $topic = $oldTopic;
   my $attachment = $oldAttachment;
 
-  opendir( my $dh, $Foswiki::cfg{PubDir}.'/'.$web.'/'.$topic.'/' ) || next;
+  opendir( my $dh, $Foswiki::cfg{PubDir}.'/'.$web.'/'.$topic.'/' ) || return;
   my @thumbs = grep { /^igp_[0-9a-f]{32}_$attachment$/  } readdir $dh;
   closedir $dh;
 
@@ -708,7 +722,9 @@ sub mirrorImage {
   my ($this, $web, $topic, $url, $fileName, $force) = @_;
 
   writeDebug("called mirrorImage($url, $fileName, $force)");
-  return 1 if !$force && -e $fileName;
+  return 1 if !$force && -e "$fileName";
+
+  writeDebug("didn't find $fileName");
 
   my $downloadFileName;
 
@@ -727,7 +743,7 @@ sub mirrorImage {
   unless ($this->{ua}) {
     require LWP::UserAgent;
     my $ua = LWP::UserAgent->new;
-    $ua->timeout(10);
+    $ua->timeout(5);
 
     my $attachLimit = Foswiki::Func::getPreferencesValue('ATTACHFILESIZELIMIT') || 0;
     $attachLimit =~ s/[^\d]//g;
@@ -796,6 +812,7 @@ sub getImageFile {
 
   my $imgPath = $Foswiki::cfg{PubDir}.'/'.$imgWeb.'/'.$imgTopic.'/'.$imgFile;
   my $fileSize = -s $imgPath;
+  return unless defined $fileSize; # not found
 
   my $digest = Digest::MD5::md5_hex($size, $zoom, $crop, $fileSize);
 
@@ -911,6 +928,17 @@ sub suffixToMimeType {
   return $mimeType;
 }
 
+##############################################################################
+# local version
+sub sanitizeAttachmentName {
+  my $fileName = shift;
+
+  $fileName =~ s{[\\/]+$}{};    # Get rid of trailing slash/backslash (unlikely)
+  $fileName =~ s!^.*[\\/]!!;    # Get rid of leading directory components
+  $fileName =~ s/[\*?~^\$@%`"'&;|<>\[\]#\x00-\x1f\(\)]//g; # Get rid of a subset of Namefilter
+
+  return Foswiki::Sandbox::untaintUnchecked($fileName);
+}
 
 
 1;
