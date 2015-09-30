@@ -1,7 +1,7 @@
 # Plugin for Foswiki - The Free and Open Source Wiki, http://foswiki.org/
 #
 # Copyright (C) 2006 Craig Meyer, meyercr@gmail.com
-# Copyright (C) 2006-2014 Michael Daum http://michaeldaumconsulting.com
+# Copyright (C) 2006-2015 Michael Daum http://michaeldaumconsulting.com
 #
 # Based on ImgPlugin
 # Copyright (C) 2006 Meredith Lesly, msnomer@spamcop.net
@@ -27,21 +27,17 @@ package Foswiki::Plugins::ImagePlugin;
 use strict;
 use warnings;
 
-our $imageCore;
-our $baseWeb;
-our $baseTopic;
+use Foswiki::Func ();
+use Foswiki::Plugins ();
 
-our $VERSION = '3.33';
-our $RELEASE = '3.33';
+our $VERSION = '7.01';
+our $RELEASE = '26 Sep 2015';
 our $NO_PREFS_IN_TOPIC = 1;
 our $SHORTDESCRIPTION = 'Image and thumbnail services to display and alignment images using an easy syntax';
-
-use Foswiki::Plugins ();
-use Foswiki::Meta ();
+our $core;
 
 ###############################################################################
 sub initPlugin {
-  ($baseTopic, $baseWeb) = @_;
 
   # check for Plugins.pm versions
   if ($Foswiki::Plugins::VERSION < 1.026) {
@@ -50,13 +46,13 @@ sub initPlugin {
   }
 
   # init plugin variables
-  $imageCore = undef;
+  $core = undef;
 
   # register the tag handlers
   Foswiki::Func::registerTagHandler(
     'IMAGE',
     sub {
-      return getCore($baseWeb, $baseTopic, shift)->handleIMAGE(@_);
+      return getCore(shift)->handleIMAGE(@_);
     }
   );
 
@@ -64,9 +60,11 @@ sub initPlugin {
   Foswiki::Func::registerRESTHandler(
     'resize',
     sub {
-      getCore($baseWeb, $baseTopic, shift)->handleREST(@_);
+      getCore(shift)->handleREST(@_);
     },
-    authenticate => 0
+    authenticate => 0,
+    validate => 0,
+    http_allow => 'GET,POST',
   );
 
   # register jquery.imagetooltip plugin if jquery is isntalled
@@ -82,48 +80,69 @@ sub initPlugin {
 ###############################################################################
 # lazy initializer
 sub getCore {
-  return $imageCore if $imageCore;
+  return $core if $core;
 
   Foswiki::Func::addToZone("head", "IMAGEPLUGIN", <<'HERE');
 <link rel="stylesheet" href="%PUBURLPATH%/%SYSTEMWEB%/ImagePlugin/style.css" type="text/css" media="all" />
 HERE
 
   require Foswiki::Plugins::ImagePlugin::Core;
-  $imageCore = new Foswiki::Plugins::ImagePlugin::Core(@_);
-  return $imageCore;
+  $core = Foswiki::Plugins::ImagePlugin::Core->new(@_);
+  return $core;
+}
+
+###############################################################################
+sub finishPlugin {
+  $core->finishPlugin if defined $core;
 }
 
 ###############################################################################
 sub afterRenameHandler {
 
-  getCore($baseWeb, $baseTopic)->afterRenameHandler(@_);
+  getCore->afterRenameHandler(@_);
 }
+
+###############################################################################
+sub beforeSaveHandler {
+  #my ($text, $topic, $web, $meta) = @_;
+
+  getCore->beforeSaveHandler(@_);
+}
+
+###############################################################################
+sub completePageHandler {
+  #my $text = $_[0];
+
+  return unless $Foswiki::cfg{ImagePlugin}{ConvertInlineSVG};
+
+  getCore->completePageHandler(@_);
+}
+
 
 ###############################################################################
 sub commonTagsHandler {
 
-  return unless $Foswiki::cfg{ImagePlugin}{RenderExternalImageLinks};
-
-  # only render an external image link when in view mode
   return unless Foswiki::Func::getContext()->{view};
+  return unless $Foswiki::cfg{ImagePlugin}{RenderExternalImageLinks} || $Foswiki::cfg{ImagePlugin}{RenderLocalImages};
 
   my ($text, $topic, $web) = @_;
-
-  #print STDERR "called commonTagsHandler($web, $topic, $included)\n";
-
-  # Have our own _externalLink early enough in the rendering loop
-  # so that we know which topic we are rendering the url for. This now
-  # happens as part of the macro expansion and not as part of the tml rendering
-  # loop.
 
   my $removed = {};
   $text = takeOutBlocks($text, 'noautolink', $removed);
 
-  $text =~ s/(^|(?<!url)[-*\s(|])
-               (https?:
-                   ([^\s<>"]+[^\s*.,!?;:)<|][^\s]*\.(?:gif|jpe?g|png|bmp|svg)(?:\?.*)?(?=[^\w])))/
-                     renderExternalLink($web, $topic, $1, $2)/geox;
-  putBackBlocks(\$text, $removed, 'noautolink', 'noautolink' );
+  if ($Foswiki::cfg{ImagePlugin}{RenderExternalImageLinks}) {
+    $text =~ s/(^|(?<!url)[-*\s(|])
+                 (https?:
+                     ([^\s<>"]+[^\s*.,!?;:)<|][^\s]*\.(?:gif|jpe?g|png|bmp|svg)(?:\?.*)?(?=[^\w\-])))/
+                       renderExternalImage($web, $topic, $1, $2)/gieox;
+
+  }
+
+  if ($Foswiki::cfg{ImagePlugin}{RenderLocalImages}) {
+    $text =~ s/(<img ([^>]+)?\/>)/renderLocalImage($web, $topic, $1)/ge;
+  }
+
+  putBackBlocks(\$text, $removed, 'noautolink', 'noautolink');
 
   # restore the text
   $_[0] = $text;
@@ -148,16 +167,67 @@ sub putBackBlocks {
 }
 
 ###############################################################################
-sub renderExternalLink {
+sub renderLocalImage {
+  my ($web, $topic, $text) = @_;
+
+  #print STDERR "renderLocalImage at $web.$topic from $text\n";
+
+  my @args = ();
+
+  my $file;
+  my $imgWeb;
+  my $imgTopic;
+
+  my $defaultUrlHost = $Foswiki::cfg{DefaultUrlHost};
+  $defaultUrlHost =~ s/^http:/https?:/;
+
+  foreach my $attr (qw(src width height title align style class alt)) {
+    if ($text =~ /$attr=["']([^"']+)["']/) {
+      my $val = $1;
+
+      if ($attr eq 'src') {
+        if ($val =~ /^(?:$defaultUrlHost)?$Foswiki::cfg{PubUrlPath}\/(.*)\/([^\/]+)$/) {
+          ($imgWeb, $imgTopic) = Foswiki::Func::normalizeWebTopicName(undef, $1);
+          $file = $2;
+          if ($imgWeb ne $web || $imgTopic ne $topic) {
+            #print STDERR "excluding image at $imgWeb.$imgTopic\n" if $imgWeb ne $Foswiki::cfg{SystemWebName};
+            return $text;
+          }
+          push @args, "topic=\"$imgWeb.$imgTopic\"" if $imgWeb ne $web || $imgTopic ne $topic;
+        } else {
+          # not a local image -> return original text
+          #print STDERR "not a local image: $val\n";
+          return $text;
+        }
+      } elsif (($attr eq 'width' || $attr eq 'height') && $val !~ /^\d+(px)?$/) {
+        return $text; # this is not a px unit ... keep the img as it is
+      } else {
+        push @args, "$attr=\"$val\"";
+      }
+    }
+  }
+
+  return $text unless defined $file; # oh well ... can't extract src
+
+  push @args, 'type="plain"';
+
+  my $result = "%IMAGE{\"$file\" ".join(" ", @args)."}%";
+
+  #print STDERR "result=$result\n";
+
+  return $result;
+}
+
+###############################################################################
+sub renderExternalImage {
   my ($web, $topic, $prefix, $url) = @_;
 
-  #print STDERR "called renderExternalLink($web, $topic, $url)\n";
+  #print STDERR "called renderExternalImage($web, $topic, $url)\n";
 
   my $href = '';
   my $title = $url;
 
-  my $session = $Foswiki::Plugins::SESSION;
-  my $pubUrl = $session->getPubUrl(1);
+  my $pubUrl = getPubUrl();
 
   # skip "external links" to self and to any other excluded url
   my $excludePattern = $Foswiki::cfg{ImagePlugin}{Exclude};
@@ -177,13 +247,26 @@ sub renderExternalLink {
       topic => $topic
     };
 
-    return $prefix.getCore($baseWeb, $baseTopic)->handleIMAGE($params, $topic, $web);
+    return $prefix.getCore()->handleIMAGE($params, $topic, $web);
   }
 
   #print STDERR "normal handling of $url\n";
 
   # else, return the orig url
   return $prefix.$url;
+}
+
+###############################################################################
+sub getPubUrl {
+  my $session = $Foswiki::Plugins::SESSION;
+
+  if ($session->can("getPubUrl")) {
+    # pre 1.2
+    return $session->getPubUrl(1);
+  } 
+
+  # post 1.2
+  return Foswiki::Func::getPubUrlPath(absolute=>1);
 }
 
 1;
