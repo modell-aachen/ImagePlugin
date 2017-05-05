@@ -710,16 +710,16 @@ sub processImage {
 }
 
 ###############################################################################
-sub beforeSaveHandler {
-  my ($this, undef, $topic, $web, $meta) = @_;
+sub afterSaveHandler {
+  my ($this, $text, $topic, $web, $error, $meta) = @_;
 
   return unless $this->{autoAttachInlineImages};
 
   my $wikiName = Foswiki::Func::getWikiName();
   return unless Foswiki::Func::checkAccessPermission("CHANGE", $wikiName, undef, $topic, $web);
 
-  $meta = Foswiki::Func::readTopic($web, $topic) unless defined $meta;
-  my $text = $meta->text;
+  ($meta) = Foswiki::Func::readTopic($web, $topic) unless defined $meta;
+  $text = $meta->text unless defined $text;
 
   my $i = 0;
   my @images = ();

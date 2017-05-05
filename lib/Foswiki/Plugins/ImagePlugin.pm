@@ -103,10 +103,10 @@ sub afterRenameHandler {
 }
 
 ###############################################################################
-sub beforeSaveHandler {
+sub afterSaveHandler {
   #my ($text, $topic, $web, $meta) = @_;
 
-  getCore->beforeSaveHandler(@_);
+  getCore->afterSaveHandler(@_);
 }
 
 ###############################################################################
