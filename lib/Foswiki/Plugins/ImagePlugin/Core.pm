@@ -738,7 +738,7 @@ sub afterSaveHandler {
 
     print $fh $data;
     my $size = do { use bytes; length $data };
-
+    close $fh;
     my $attachment = Digest::MD5::md5_hex($data) . '.' . $suffix;
 
     #print STDERR "found inline image: mimeType=$mimeType, attachment=$attachment, charset=$charset, data=$size, tmpfile=$filename\n";
@@ -772,6 +772,7 @@ sub afterSaveHandler {
   }
 
   $meta->text($text) if $i;
+  $meta->saveAs($web,$topic);
 
 }
 
