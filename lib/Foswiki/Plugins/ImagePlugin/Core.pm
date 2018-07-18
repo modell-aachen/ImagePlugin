@@ -612,7 +612,7 @@ sub processImage {
                 my $wantedWidth = $1;
                 my $wantedHeight = $2;
 
-                if($this->{mage}->Get('height') < $wantedHeight && $this->{mage}->Get('columns') < $wantedWidth) {
+                if(($this->{mage}->Get('height') || 0) < $wantedHeight && ($this->{mage}->Get('columns') || 0) < $wantedWidth) {
                     $size = "${wantedWidth}x$wantedHeight>";
                     $crop = 'center';
                 }
