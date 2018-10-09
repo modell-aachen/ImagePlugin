@@ -174,7 +174,7 @@ Arguments to the =resize= handlers are:
 | =file= | specifies the image filename | | 
 | =width= | width of thumbnail  | |
 | =height= | height of thumbnail  | |
-| =size= | geometry of thumbnail  | |
+| =size= | geometry of thumbnail; special syntax: size=...x...^m will be converted to size=...x...^ if the image does not fit into the given geometry, otherwise it will be set to size=...x... crop=center | |
 | =zoom= | switch on/off upscaling  | |
 | =refresh= | on/off/img to trigger recomputing images | off |
 

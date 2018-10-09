@@ -540,7 +540,7 @@ sub processImage {
         $size = $width . 'x' . $height;
       }
     }
-    if ($size && $size !~ /[<>^]$/) {
+    if ($size && $size !~ /[<>^]$|\^m$/) {
       if ($zoom eq 'on') {
         $size .= '<';
       } else {
@@ -606,6 +606,19 @@ sub processImage {
 
       # scale
       if ($size) {
+        if($size =~ s#\^m\^?$#^#) {
+            # modac: center if image smaller than geometry
+            if($size =~ m#^(\d+)x(\d+)#) {
+                my $wantedWidth = $1;
+                my $wantedHeight = $2;
+
+                if(($this->{mage}->Get('height') || 0) < $wantedHeight && ($this->{mage}->Get('columns') || 0) < $wantedWidth) {
+                    $size = "${wantedWidth}x$wantedHeight>";
+                    $crop = 'center';
+                }
+            }
+        }
+
         writeDebug("scale");
         my $geometry = $size;
         # SMELL: As of IM v6.3.8-3 IM now has a new geometry option flag '^' which
