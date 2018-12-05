@@ -788,8 +788,10 @@ sub afterSaveHandler {
     $i++;
   }
 
-  $meta->text($text) if $i;
-  $meta->saveAs($web,$topic);
+  if($i){
+    $meta->text($text);
+    $meta->saveAs($web,$topic);
+  }
 
 }
 
