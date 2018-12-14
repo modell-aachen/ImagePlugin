@@ -29,6 +29,7 @@ use warnings;
 
 use Foswiki::Plugins ();
 use Foswiki::Func ();
+use Foswiki::Store::PlainFile ();
 use Error qw( :try );
 use Foswiki::OopsException ();
 use Digest::MD5 ();
@@ -118,6 +119,9 @@ sub handleREST {
   my $theTopic = $query->param('topic') || $this->{session}->{topicName};
   my $theWeb = $query->param('web') || $this->{session}->{webName};
   my ($imgWeb, $imgTopic) = Foswiki::Func::normalizeWebTopicName($theWeb, $theTopic);
+  if(Foswiki::Store::PlainFile->can('_getVirtualWeb')) {
+      $imgWeb = Foswiki::Store::PlainFile::_getVirtualWeb($imgWeb, $imgTopic);
+  }
   my $imgFile = $query->param('file');
   my $refresh = $query->param('refresh') || '';
   $refresh = ($refresh =~ /^(on|1|yes|img)$/g) ? 1 : 0;
@@ -784,8 +788,10 @@ sub afterSaveHandler {
     $i++;
   }
 
-  $meta->text($text) if $i;
-  $meta->saveAs($web,$topic);
+  if($i){
+    $meta->text($text);
+    $meta->saveAs($web,$topic);
+  }
 
 }
 
