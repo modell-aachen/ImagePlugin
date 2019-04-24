@@ -4,11 +4,11 @@
 
 # **BOOLEAN**
 # Turn on/off downloading and mirroring of links to external images, e.g. http://some.external.site/avatar.jpg
-$Foswiki::cfg{ImagePlugin}{RenderExternalImageLinks} = 1;
+$Foswiki::cfg{ImagePlugin}{RenderExternalImageLinks} = 0;
 
 # **BOOLEAN**
 # Activate this flag to process HTML <code>img</code> markup to local images
-$Foswiki::cfg{ImagePlugin}{RenderLocalImages} = 1;
+$Foswiki::cfg{ImagePlugin}{RenderLocalImages} = 0;
 
 # **BOOLEAN**
 # Activate this flag to convert inline-svg to png
@@ -19,7 +19,7 @@ $Foswiki::cfg{ImagePlugin}{ConvertInlineSVG} = 0;
 # an attachment-record is generated for this image in addition to
 # downloading the image. Attachments will be marked as hidden. Note, that any
 # auto-attached image will update the topic and with it its timestamp.
-$Foswiki::cfg{ImagePlugin}{AutoAttachExternalImages} = 1;
+$Foswiki::cfg{ImagePlugin}{AutoAttachExternalImages} = 0;
 
 # **BOOLEAN**
 # Turn on/off automatic extraction of inline image from a topic while being saved and 
